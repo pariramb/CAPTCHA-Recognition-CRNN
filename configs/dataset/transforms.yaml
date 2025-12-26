@@ -1,0 +1,30 @@
+# Трансформации для обучения
+train_transforms:
+  - name: "RandomRotation"
+    degrees: 10
+    p: 0.5
+  
+  - name: "RandomBrightnessContrast"
+    brightness_limit: 0.2
+    contrast_limit: 0.2
+    p: 0.5
+  
+  - name: "GaussianBlur"
+    blur_limit: 3
+    p: 0.3
+
+# Трансформации для валидации и теста
+val_transforms: []
+
+# Обязательные трансформации
+base_transforms:
+  resize:
+    height: ${dataset.base.image_size}
+    width: ${dataset.base.image_size}
+  
+  normalize:
+    mean: [0.5, 0.5, 0.5]
+    std: [0.5, 0.5, 0.5]
+
+# Использование Albumentations
+use_albumentations: true

@@ -1,0 +1,5 @@
+model_path: "models/best_model.pth"
+token_dict_path: "token_dictionary.pkl"
+batch_size: 1
+threshold: 0.5
+device: ${oc.env:INFERENCE_DEVICE,cpu}

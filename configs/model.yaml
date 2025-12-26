@@ -1,0 +1,12 @@
+name: "LACC"
+encoder: "efficientnet_v2_m"
+hidden_size: 512
+dropout: 0.3
+
+checkpoint:
+  enabled: false
+  path: ${oc.env:CHECKPOINT_PATH,/kaggle/input/pytorch-captcha-recognizer/Checkpoint.pth}
+
+output:
+  num_classes: 63  # special_chars + numerals + uppercase + lowercase
+  sequence_length: ${data.max_length}

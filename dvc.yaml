@@ -1,0 +1,28 @@
+stages:
+  download_data:
+    cmd: python scripts/download_data.py
+    deps:
+      - scripts/download_data.py
+    outs:
+      - data/
+    params:
+      - data.dataset_paths
+  
+  train:
+    cmd: python scripts/train.py
+    deps:
+      - scripts/train.py
+      - src/
+      - data/
+    params:
+      - training
+      - model
+      - data
+    metrics:
+      - metrics.json:
+          cache: false
+    outs:
+      - models/best_model.pth
+      - checkpoints/
+      - token_dictionary.pkl
+      - plots/

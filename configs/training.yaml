@@ -1,0 +1,21 @@
+epochs: 10
+learning_rate: 0.0001
+weight_decay: 0.01
+optimizer: "Lion"
+scheduler:
+  enabled: true
+  type: "CosineAnnealingLR"
+  T_max: 10
+  eta_min: 1e-6
+
+loss: "CrossEntropyLoss"
+metrics: ["accuracy", "character_accuracy", "sequence_accuracy"]
+
+early_stopping:
+  enabled: true
+  patience: 5
+  min_delta: 0.001
+
+gradient_clipping:
+  enabled: true
+  max_norm: 1.0

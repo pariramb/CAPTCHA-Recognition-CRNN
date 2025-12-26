@@ -1,0 +1,36 @@
+
+# Основные параметры датасета
+image_size: 256
+max_len: 10
+batch_size: 32
+
+# Пути к данным
+data_paths:
+  - "/kaggle/input/large-captcha-dataset/Large_Captcha_Dataset"
+  - "/kaggle/input/captcha-dataset"
+  - "/kaggle/input/comprasnet-captchas/comprasnet_imagensacerto"
+  - "/kaggle/input/captcha-images"
+  - "/kaggle/input/captcha-version-2-images/"
+
+# Запрещенные файлы
+ban_data:
+  - '/kaggle/input/large-captcha-dataset/Large_Captcha_Dataset/4q2wA.png'
+
+# Разделение данных
+train_split: 0.9
+test_split: 0.1
+validation_split: 0.0
+
+# Словари символов
+chars:
+  special:
+    - "<pad>"
+  numbers:
+    - '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'
+  uppercase:
+    - 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'
+  lowercase:
+    - 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'
+
+# Автоматически вычисляем общее количество символов
+num_chars: ${len(chars.special) + len(chars.numbers) + len(chars.uppercase) + len(chars.lowercase)}
