@@ -55,10 +55,14 @@ python scripts/train.py data.batch_size=32 training.epochs=10
 ```
 
 ## Production preparation
+```
 python scripts/export_model.py --format onnx
+```
 
 ## Infer
+```
 python scripts/infer.py --image path/to/image.png
+```
 
 **Формат данных**
 
