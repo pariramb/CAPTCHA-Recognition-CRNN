@@ -1,123 +1,119 @@
 #!/usr/bin/env python3
-"""Inference script for CAPTCHA recognizer."""
-
-import argparse
-from pathlib import Path
-from typing import List, Optional
+import os
+import sys
 import hydra
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 import torch
-import cv2
-import numpy as np
-from PIL import Image
-import pandas as pd
+import torchvision
+import matplotlib.pyplot as plt
 
-from src.models.lacc import LACC
-from src.data.dataset import CaptchaDataset
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-
-class CAPTCHAPredictor:
-    """CAPTCHA prediction class."""
-    
-    def __init__(self, config_path: str = "../configs/inference.yaml"):
-        with hydra.initialize(version_base=None, config_path="../configs"):
-            self.config = hydra.compose(config_name="inference")
-        
-        checkpoint = torch.load(self.config.model_path, map_location=self.config.device)
-        self.model = LACC.load_from_checkpoint(self.config.model_path, strict=False)
-        self.model.eval()
-        self.model.to(self.config.device)
-        
-        with open(self.config.token_dict_path, "rb") as f:
-            import pickle
-            self.token_dict = pickle.load(f)
-        self.reverse_token_dict = {v: k for k, v in self.token_dict.items()}
-    
-    def preprocess_image(self, image_path: str) -> torch.Tensor:
-        """Preprocess image for inference."""
-        image = cv2.imread(image_path)
-        if image is None:
-            raise ValueError(f"Failed to load image: {image_path}")
-        
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        
-        image = cv2.resize(image, (256, 256))
-        image = image.astype(np.float32) / 255.0
-        image = (image - 0.5) / 0.5  # Normalize to [-1, 1]
-        
-        image = torch.from_numpy(image).permute(2, 0, 1).unsqueeze(0)
-        return image.to(self.config.device)
-    
-    def decode_prediction(self, logits: torch.Tensor) -> str:
-        """Decode model output to string."""
-        predictions = torch.argmax(logits, dim=1)[0]
-        prediction_str = ""
-        
-        for idx in predictions.cpu().numpy():
-            if idx in self.token_dict and self.token_dict[idx] != "<pad>":
-                prediction_str += self.token_dict[idx]
-        
-        return prediction_str
-    
-    def predict(self, image_path: str) -> str:
-        """Predict CAPTCHA from image."""
-        image_tensor = self.preprocess_image(image_path)
-        
-        with torch.no_grad():
-            logits = self.model(image_tensor)
-        
-        prediction = self.decode_prediction(logits)
-        return prediction
-    
-    def predict_batch(self, image_paths: List[str]) -> List[str]:
-        """Predict batch of images."""
-        predictions = []
-        
-        for image_path in image_paths:
-            try:
-                prediction = self.predict(image_path)
-                predictions.append(prediction)
-            except Exception as e:
-                print(f"Error processing {image_path}: {e}")
-                predictions.append("")
-        
-        return predictions
+from src.dataset import create_dataloaders
+from src.model import create_model
+from src.train import Trainer, load_checkpoint, save_checkpoint
+from src.utils import set_random_seed, setup_matplotlib, clean_memory, plot_loss
+from src.inference import Inference
+from src.config import setup_config
 
 
-def main():
-    """Main inference function."""
-    parser = argparse.ArgumentParser(description="CAPTCHA Recognizer Inference")
-    parser.add_argument("--image", type=str, help="Path to single image")
-    parser.add_argument("--input_dir", type=str, help="Path to input directory")
-    parser.add_argument("--output_file", type=str, default="predictions.csv", help="Output CSV file")
-    parser.add_argument("--device", type=str, default="cpu", help="Device to use (cpu/cuda)")
+@hydra.main(version_base=None, config_path="../configs", config_name="config")
+def main(cfg: DictConfig):
+    cfg = setup_config(cfg)
     
-    args = parser.parse_args()
+    print(OmegaConf.to_yaml(cfg))
     
-    predictor = CAPTCHAPredictor()
+    clean_memory()
+    set_random_seed(cfg.seed)
     
-    if args.image:
-        prediction = predictor.predict(args.image)
-        print(f"Image: {args.image}")
-        print(f"Prediction: {prediction}")
+    use_cuda = cfg.use_cuda and torch.cuda.is_available()
+    device = torch.device(cfg.device if use_cuda else "cpu")
+    print(f"Device: {device}")
     
-    elif args.input_dir:
-        input_dir = Path(args.input_dir)
-        image_files = list(input_dir.glob("*.png")) + list(input_dir.glob("*.jpg"))
-        image_paths = [str(f) for f in image_files]
-        
-        predictions = predictor.predict_batch(image_paths)
-        
-        df = pd.DataFrame({
-            "image": image_paths,
-            "prediction": predictions,
-        })
-        df.to_csv(args.output_file, index=False)
-        print(f"Predictions saved to {args.output_file}")
-        print(f"Processed {len(predictions)} images")
+    fontprop = None
+    if cfg.inference.visualization.get('font_path'):
+        fontprop = setup_matplotlib(cfg.inference.visualization.font_path)
     
+    print(f"Torch Version: {torch.__version__}")
+    print(f"TorchVision Version: {torchvision.__version__}")
+
+    print("\nCreating dataloaders...")
+    train_dataloader, test_dataloader = create_dataloaders(cfg, mode="train")
+
+    print("\nCreating model...")
+    model = create_model(cfg, device)
+    
+    if cfg.optimizer.name.lower() == "lion":
+        from lion_pytorch import Lion
+        optimizer = Lion(
+            model.parameters(),
+            lr=cfg.optimizer.lr,
+            weight_decay=cfg.optimizer.weight_decay,
+            betas=tuple(cfg.optimizer.betas)
+        )
     else:
-        print("Please provide either --image or --input_dir argument")
+        optimizer = torch.optim.AdamW(
+            model.parameters(),
+            lr=cfg.optimizer.lr,
+            weight_decay=cfg.optimizer.weight_decay,
+            betas=tuple(cfg.optimizer.betas)
+        )
+    
+    if cfg.optimizer.loss.name == "cross_entropy":
+        criterion = torch.nn.CrossEntropyLoss(
+            label_smoothing=cfg.optimizer.loss.get('label_smoothing', 0.0)
+        )
+    else:
+        criterion = torch.nn.CrossEntropyLoss()
+    
+    start_epoch = cfg.training.start_epoch
+    if cfg.training.checkpoint.get('save_best') and os.path.exists(cfg.checkpoint_path):
+        checkpoint_file = os.path.join(cfg.checkpoint_path, "best_model.pth")
+        if os.path.exists(checkpoint_file):
+            start_epoch = load_checkpoint(model, optimizer, checkpoint_file, device)
+            print(f"Loaded checkpoint from epoch {start_epoch}")
+    
+    print(f"\nStarting training from epoch {start_epoch}...")
+    trainer = Trainer(model, optimizer, criterion, device, cfg)
+    
+    train_losses, test_losses, accuracies = trainer.train(
+        train_dataloader,
+        test_dataloader,
+        epochs=cfg.training.epochs,
+        start_epoch=start_epoch
+    )
+
+    plt.figure(figsize=(10, 5))
+    
+    plt.subplot(1, 2, 1)
+    plot_loss(train_losses, test_losses, start_epoch)
+    
+    plt.subplot(1, 2, 2)
+    plt.plot(range(start_epoch, start_epoch + len(accuracies)), accuracies)
+    plt.xlabel("Epoch")
+    plt.ylabel("Accuracy")
+    plt.title("Validation Accuracy")
+    plt.grid(True)
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(cfg.save_dir, "training_plots.png"))
+    plt.show()
+
+    print("\nTesting inference on samples...")
+    inference = Inference(model, device, cfg)
+    results = inference.test_samples(test_dataloader, num_samples=10)
+    
+    correct = sum(1 for r in results if r['correct'])
+    print(f"\nSample Accuracy: {correct}/{len(results)} ({correct/len(results)*100:.1f}%)")
+
+    print("\nSaving model...")
+    save_checkpoint(
+        model,
+        optimizer,
+        start_epoch + cfg.training.epochs - 1,
+        os.path.join(cfg.save_dir, "final_model.pth"),
+        cfg
+    )
 
 
 if __name__ == "__main__":
