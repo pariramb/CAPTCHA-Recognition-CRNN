@@ -1,0 +1,13 @@
+defaults:
+  - data: svhn
+  - _self_
+
+logging:
+  level: INFO
+  log_file: logs/infer.log
+
+infer:
+  onnx_path: artifacts/model.onnx
+  inputs:
+    - data_inference
+  output: outputs/predictions.jsonl

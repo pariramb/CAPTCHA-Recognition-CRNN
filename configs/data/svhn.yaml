@@ -1,0 +1,9 @@
+root: /home/yana/CAPTCHA-Recognition-CRNN/data
+
+image_size: 256
+batch_size: 20
+num_workers: 4
+pin_memory: true
+
+# DVC integration
+dvc_storage: /home/yana/storage

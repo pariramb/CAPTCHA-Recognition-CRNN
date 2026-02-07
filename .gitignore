@@ -22,12 +22,13 @@ checkpoints/
 artifacts/
 
 # Data (MUST NOT be in git)
-data/raw/
-data/processed/
+/data/
+data_inference/
 
 # DVC
 .dvc/cache/
 
-# OS
-.DS_Store
-/data
+
+node_modules/
+pytorch-captcha-recognizer.ipynb
+mlflow.db
