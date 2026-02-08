@@ -23,7 +23,6 @@ artifacts/
 
 # Data (MUST NOT be in git)
 /data/
-data_inference/
 
 # DVC
 .dvc/cache/
@@ -32,3 +31,5 @@ data_inference/
 node_modules/
 pytorch-captcha-recognizer.ipynb
 mlflow.db
+/data
+/dataset

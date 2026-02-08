@@ -19,11 +19,13 @@ We will use 5 different datasets. 90% is used for training. 10% is used for vali
 ### Data
 
 References:
+
 https://www.kaggle.com/datasets/akashguna/large-captcha-dataset
 www.kaggle.com/datasets/parsasam/captcha-dataset
 https://www.kaggle.com/datasets/aadhavvignesh/captcha-images
 https://www.kaggle.com/datasets/fournierp/captcha-version-2-images
 https://www.kaggle.com/datasets/jassoncarvalho/comprasnet-captchas
+
 In total we have 271403 samples. Of the features - there is one captcha in the solution, which is thrown out by the author, it is to be found out why. All captchas have English letters and numbers. The data weighs about 3 Gb.
 
 ## Modeling
@@ -42,70 +44,200 @@ I think that this model can be used to bypass captchas on websites using, for ex
 
 ## Setup
 
-pip install uv
+### Install Dependencies
+
+The project uses `uv` for dependency management. Install it and sync the environment:
 
 ```bash
+# Install uv (if not already installed)
+pip install uv
+
+# Navigate to the project directory and install dependencies
 cd /path/to/project
 uv sync
 ```
 
-## Train
-Datasets take from Kaggle, you need to take a token
-Необходимо заполнить svhn.yaml
-Запустить `mlflow`
+### Download Dataset
+
 ```bash
+cd /path/to/project
+export KAGGLE_API_TOKEN=YOUR_TOKEN
+uv run -m captcha_rec.commands download_data data.dvc_storage=/full/path/to/dataset
+```
+
+**Notes:**
+
+- data.dvc_storage - path to the directory where the dvc storage will be stored
+
+- Data is automatically downloaded via DVC when needed
+
+- A configured Kaggle API token is required
+
+## Train
+
+### Start MLflow for Experiment Tracking
+
+MLflow is used for logging metrics, parameters, and artifacts:
+
+```bash
+cd /path/to/project
 uv run mlflow server --host 127.0.0.1 --port 8080
 ```
 
+### Start Training
+
+Run model training with specified parameters:
+
 ```bash
+cd /path/to/project
 export KAGGLE_API_TOKEN=YOUR_TOKEN
-uv run -m captcha_rec.commands train trainer.max_epochs=6 model.lr=0.0002
+uv run -m captcha_rec.commands train \
+  trainer.max_epochs=6 \
+  model.lr=0.0002 \
+  data.dvc_storage=/path/to/dataset
 ```
 
-Сперва будет скачан датасет в x
+**Main parameters:**
+
+- `trainer.max_epochs` - number of training epochs
+
+- `model.lr` - learning rate
+
+- `data.dvc_storage` - path to the dataset
+
+**What happens during training:**
+
+1. Automatic dataset download if needed
+
+2. DataModule initialization for data processing
+
+3. LACCModule model creation
+
+4. MLflow logging setup
+
+5. Callbacks used:
+   - ModelCheckpoint for saving best weights
+
+   - LearningRateMonitor for tracking learning rate changes
+
+6. Training plots saved to the plots/ directory
+
 ## Production preparation
 
-## Infer
+### Export to ONNX
 
-# captcha-rec
-
-Проект: распознавание символов на изображениях (OCR) на основе нейросети **LACC**:
-
-- backbone: `efficientnet_v2_m().features`
-- преобразование признаков через матрицу `converter` (как в исходном коде)
-- предсказание последовательности токенов длины `max_len` (с `<pad>`)
-
-Реализовано:
-
-- обучение: PyTorch Lightning
-- конфиги: Hydra (`configs/`)
-- данные: DVC (встроено в команды train/infer) или bootstrap через `download_data()`
-- логирование: MLflow (метрики + гиперпараметры + git commit id)
-- production: export ONNX + export TensorRT (через `trtexec`)
-- inference: onnxruntime (отдельный лёгкий код)
-- inference server: подготовка репозитория Triton (`prepare_triton_repo`)
-- качество кода: pre-commit (black/isort/flake8/prettier)
-
----
-
-## Setup
+Export the trained model to ONNX format for optimized inference:
 
 ```bash
-poetry install
-poetry run pre-commit install
-
-# MLflow (локально):
-poetry run mlflow server --host 127.0.0.1 --port 8080
-
-# DVC:
-poetry run dvc init
-# настроить remote (gdrive/s3/local) и сделать dvc add/push данных и артефактов
+uv run -m captcha_rec.commands export_onnx
 ```
 
-    """
-    Единая точка входа.
-    Пример:
-      python -m captcha_rec.commands train trainer.max_epochs=2 model.lr=0.0002
-      python -m captcha_rec.commands export_onnx export.onnx_path=artifacts/model.onnx
-      python -m captcha_rec.commands infer infer.inputs=[data/examples] infer.output=outputs/preds.jsonl
-    """
+**Functionality:**
+
+- Automatically finds the latest checkpoint in checkpoints/
+
+- Exports the model with correct input/output dimensions
+
+- Saves the model to the path specified in the configuration
+
+### Export to TensorRT
+
+Convert ONNX model to TensorRT engine for maximum performance:
+
+```bash
+uv run -m captcha_rec.commands export_trt
+```
+
+**Configuration parameters:**
+
+- `export.trt_fp16` - use half precision
+
+- `export.trt_workspace_mb` - workspace memory size
+
+### Register Model in MLflow Model Registry
+
+Prepare the model for serving via MLflow:
+
+```bash
+uv run -m captcha_rec.commands register_model_mlflow
+```
+
+### MLflow Serving
+
+Start a REST API server for model serving:
+
+```bash
+uv run -m captcha_rec.infer.mlflow_api
+```
+
+### Test MLflow Serving
+
+Test script to verify serving functionality:
+
+```bash
+uv run -m captcha_rec.infer.mlflow_test
+```
+
+## Inference
+
+### Batch Inference
+
+Run predictions on multiple images:
+
+```
+uv run -m captcha_rec.commands infer infer.output=outputs/preds.jsonl
+```
+
+**Configuration parameters:**
+
+- `infer.inputs` - list of paths to input images
+
+- `infer.output` - path to output JSONL file
+
+- `infer.onnx_path` - path to ONNX model
+
+**Output data format (JSONL):**
+
+```
+{"image_path": "path/to/image.png", "prediction": "ABCD", "confidence": 0.95}
+```
+
+## Batch Inference
+
+All commands are implemented in the Commands class with the following methods:
+
+1. `download_data` - download dataset
+
+2. `train` - complete training cycle with logging
+
+3. `export_onnx` - export model to ONNX format
+
+4. `export_trt` - convert to TensorRT engine
+
+5. `infer` - batch inference on images
+
+6. `register_model_mlflow` - register model in MLflow
+
+## Configuration Management
+
+The project uses Hydra for configuration management. Main configs are located in `configs/`
+
+- `train.yaml` - training configuration
+
+- `infer.yaml` - inference configuration
+
+Parameters can be overridden via command line, for example:
+
+```bash
+uv run -m captcha_rec.commands infer infer.output=outputs/preds.jsonl
+```
+
+## Training Visualization
+
+After training, plots are automatically generated in the `plots/` directory:
+
+- `loss_curves.png` - train/validation loss curves
+
+- `val_char_acc.png` - character recognition accuracy
+
+- `val_seq_acc.png` - sequence recognition accuracy

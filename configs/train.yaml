@@ -1,6 +1,6 @@
 defaults:
   - model: lacc
-  - data: svhn
+  - data: data
   - logger: mlflow
   - export: export
   - _self_

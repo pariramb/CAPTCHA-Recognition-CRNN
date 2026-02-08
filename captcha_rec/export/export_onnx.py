@@ -5,7 +5,7 @@ from pathlib import Path
 
 import torch
 
-from captcha_rec.models.lightning_module import OCRLitModule
+from captcha_rec.models.lightning_module import LACCModule
 
 logger = logging.getLogger(__name__)
 
@@ -17,15 +17,12 @@ def export_onnx(
     vocab_size: int,
     max_len: int,
 ) -> None:
-    """
-    Export trained model to ONNX.
-    """
     checkpoint_path = Path(checkpoint_path)
     onnx_path = Path(onnx_path)
     onnx_path.parent.mkdir(parents=True, exist_ok=True)
 
     logger.info("Loading checkpoint: %s", checkpoint_path)
-    lit: OCRLitModule = OCRLitModule.load_from_checkpoint(
+    lit: LACCModule = LACCModule.load_from_checkpoint(
         checkpoint_path=str(checkpoint_path),
         vocab_size=vocab_size,
         max_len=max_len,
@@ -35,9 +32,16 @@ def export_onnx(
         optimizer_name="lion",
     )
     lit.eval()
-    model = lit.model.eval()
+    model = lit.model.eval().cpu()
 
-    dummy = torch.randn(1, 3, image_size, image_size, dtype=torch.float32)
+    dummy = torch.randn(
+        1,
+        3,
+        image_size,
+        image_size,
+        dtype=torch.float32,
+        device="cpu",
+    )
 
     logger.info("Exporting ONNX to: %s", onnx_path)
     torch.onnx.export(

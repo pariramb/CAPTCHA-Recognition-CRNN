@@ -18,8 +18,9 @@ from captcha_rec.data.datamodule import CaptchaDataModule
 from captcha_rec.data.download_data import download_data
 from captcha_rec.export.export_onnx import export_onnx
 from captcha_rec.export.export_trt import export_tensorrt
+from captcha_rec.infer.mlflow_register import register_model
 from captcha_rec.infer.predict import run_onnx_infer
-from captcha_rec.models.lightning_module import OCRLitModule
+from captcha_rec.models.lightning_module import LACCModule
 from captcha_rec.utils.git import get_git_commit_id
 from captcha_rec.utils.logging import setup_logging
 
@@ -27,7 +28,6 @@ logger = logging.getLogger(__name__)
 
 
 def _repo_root() -> Path:
-    # captcha_rec/commands.py -> captcha_rec -> repo root
     return Path(__file__).resolve().parents[1]
 
 
@@ -44,9 +44,6 @@ def _compose_config(config_name: str, overrides: Sequence[str]) -> Any:
 
 
 def _dvc_pull(paths: Sequence[str]) -> None:
-    """
-    Minimal "python-integration" with DVC: run `dvc pull <paths...>`.
-    """
     cmd = ["dvc", "pull", *list(paths)]
     logger.info("Running: %s", " ".join(cmd))
     proc = subprocess.run(cmd, capture_output=True, text=True)
@@ -58,7 +55,6 @@ def _dvc_pull(paths: Sequence[str]) -> None:
 def _save_plots(series: Dict[str, list[float]], plots_dir: Path) -> None:
     plots_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1) loss curve
     if series.get("train_loss") and series.get("val_loss"):
         max_len = max(len(series["train_loss"]), len(series["val_loss"]))
         x = list(range(1, max_len + 1))
@@ -81,7 +77,6 @@ def _save_plots(series: Dict[str, list[float]], plots_dir: Path) -> None:
         plt.savefig(plots_dir / "loss_curves.png")
         plt.close()
 
-    # 2) val char acc
     if series.get("val_char_acc"):
         x = list(range(1, len(series["val_char_acc"]) + 1))
         plt.figure()
@@ -94,7 +89,6 @@ def _save_plots(series: Dict[str, list[float]], plots_dir: Path) -> None:
         plt.savefig(plots_dir / "val_char_acc.png")
         plt.close()
 
-    # 3) val seq acc
     if series.get("val_seq_acc"):
         x = list(range(1, len(series["val_seq_acc"]) + 1))
         plt.figure()
@@ -126,7 +120,6 @@ class Commands:
         setup_logging(cfg.logging.level, Path(cfg.logging.log_file))
         logger.info("Config:\n%s", OmegaConf.to_yaml(cfg))
 
-        # seed
         L.seed_everything(int(cfg.seed), workers=True)
 
         download_data(Path(cfg.data.root), cfg.data.dvc_storage)
@@ -140,8 +133,7 @@ class Commands:
             pin_memory=bool(cfg.data.pin_memory),
         )
         dm.setup()
-        # model
-        lit = OCRLitModule(
+        lit = LACCModule(
             vocab_size=dm.vocab_size,
             max_len=int(cfg.model.max_len),
             lr=float(cfg.model.lr),
@@ -150,19 +142,16 @@ class Commands:
             optimizer_name=str(cfg.model.optimizer),
         )
 
-        # logger (MLflow)
         mlflow_logger = MLFlowLogger(
             tracking_uri=str(cfg.logger.mlflow.tracking_uri),
             experiment_name=str(cfg.logger.mlflow.experiment_name),
             run_name=str(cfg.logger.mlflow.run_name),
         )
 
-        # log hparams + commit
         plain = _to_plain_dict(cfg)
         plain["git_commit_id"] = get_git_commit_id()
         mlflow_logger.log_hyperparams(plain)
 
-        # callbacks
         ckpt_dir = Path(cfg.paths.checkpoints_dir)
         ckpt_dir.mkdir(parents=True, exist_ok=True)
 
@@ -189,13 +178,11 @@ class Commands:
         logger.info("Starting training...")
         trainer.fit(lit, datamodule=dm)
 
-        # Save plots into plots/
         plots_dir = Path(cfg.paths.plots_dir)
         series = lit.export_plot_series()
         _save_plots(series, plots_dir)
         logger.info("Plots saved to: %s", plots_dir)
 
-        # Optional: export ONNX & TensorRT after training
         best_ckpt = checkpoint_cb.best_model_path
         if best_ckpt:
             export_onnx(
@@ -223,9 +210,6 @@ class Commands:
         ckpt_dir = Path(cfg.paths.checkpoints_dir)
         ckpt_path = ckpt_dir / "best.ckpt"
         if not ckpt_path.exists():
-            # lightning checkpoint is "best.ckpt" only if you name it that way;
-            # with our callback it becomes "best.ckpt" or "best-v1.ckpt" etc.
-            # try fallback: take newest .ckpt
             candidates = sorted(
                 ckpt_dir.glob("*.ckpt"),
                 key=lambda p: p.stat().st_mtime,
@@ -276,59 +260,11 @@ class Commands:
             image_size=int(cfg.data.image_size),
         )
 
-    def prepare_triton_repo(self, *overrides: str) -> None:
-        """
-        Create Triton model repository structure:
-
-          triton_models/<name>/1/model.plan
-          triton_models/<name>/config.pbtxt
-        """
-        cfg = _compose_config("train", overrides)
+    def register_model_mlflow(self, *overrides: str) -> None:
+        cfg = _compose_config("infer", overrides)
         setup_logging(cfg.logging.level, Path(cfg.logging.log_file))
 
-        model_name = str(cfg.triton.model_name)
-        repo_dir = Path(cfg.triton.repo_dir) / model_name
-        version_dir = repo_dir / "1"
-        version_dir.mkdir(parents=True, exist_ok=True)
-
-        engine_src = Path(cfg.export.trt_engine_path)
-        engine_dst = version_dir / "model.plan"
-        if not engine_src.exists():
-            raise FileNotFoundError(f"TensorRT engine not found: {engine_src}")
-        engine_dst.write_bytes(engine_src.read_bytes())
-
-        # config.pbtxt
-        vocab_size = (
-            int(cfg.model.vocab_size_override)
-            if int(cfg.model.vocab_size_override) > 0
-            else 63
-        )
-        max_len = int(cfg.model.max_len)
-        image_size = int(cfg.data.image_size)
-
-        config_text = f"""
-            name: "{model_name}"
-            platform: "tensorrt_plan"
-            max_batch_size: {int(cfg.triton.max_batch_size)}
-
-            input [
-            {{
-                name: "input"
-                data_type: TYPE_FP32
-                dims: [ 3, {image_size}, {image_size} ]
-            }}
-            ]
-            output [
-            {{
-                name: "logits"
-                data_type: TYPE_FP32
-                dims: [ {vocab_size}, {max_len} ]
-            }}
-            ]
-            """.strip()
-
-        (repo_dir / "config.pbtxt").write_text(config_text, encoding="utf-8")
-        logger.info("Triton repo prepared at: %s", repo_dir)
+        register_model(cfg.infer.onnx_path)
 
 
 def main() -> None:

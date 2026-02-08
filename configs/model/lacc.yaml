@@ -1,11 +1,6 @@
-# сохранены ключевые гиперпараметры и дух исходника
 max_len: 10
 
-# lr из исходника
 lr: 0.0001
 weight_decay: 0.01
 optimizer: lion
 
-# для Triton config (если хочешь явно задать vocab_size):
-# если 0 - команда prepare_triton_repo подставит дефолт
-vocab_size_override: 0

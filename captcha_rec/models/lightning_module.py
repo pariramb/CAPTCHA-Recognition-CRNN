@@ -11,7 +11,7 @@ from lion_pytorch import Lion
 from captcha_rec.models.lacc import LACC
 
 
-class OCRLitModule(L.LightningModule):
+class LACCModule(L.LightningModule):
     def __init__(
         self,
         vocab_size: int,
@@ -28,7 +28,6 @@ class OCRLitModule(L.LightningModule):
         self.criterion = nn.CrossEntropyLoss()
         self.pad_id = int(pad_id)
 
-        # store for plotting
         self._epoch_train_losses: list[float] = []
         self._epoch_val_losses: list[float] = []
         self._epoch_val_char_acc: list[float] = []
@@ -39,21 +38,19 @@ class OCRLitModule(L.LightningModule):
 
     @staticmethod
     def _char_accuracy(pred: torch.Tensor, target: torch.Tensor):
-        # pred/target: [B, max_len]
         return (pred == target).float().mean()
 
     @staticmethod
     def _seq_accuracy(pred: torch.Tensor, target: torch.Tensor):
-        # [B, max_len] -> [B]
         return (pred == target).all(dim=1).float().mean()
 
     def _shared_step(self, batch: Any, stage: str) -> torch.Tensor:
-        x, y = batch  # x: [B,3,H,W], y: [B,max_len]
-        logits = self(x)  # [B, vocab, max_len]
+        x, y = batch
+        logits = self(x)
 
-        log_probs = F.log_softmax(logits, dim=-2)  # over vocab
+        log_probs = F.log_softmax(logits, dim=-2)
         loss = self.criterion(log_probs, y)
-        pred = torch.argmax(log_probs, dim=-2)  # [B, max_len]
+        pred = torch.argmax(log_probs, dim=-2)
 
         char_acc = self._char_accuracy(pred, y)
         seq_acc = self._seq_accuracy(pred, y)
@@ -126,9 +123,6 @@ class OCRLitModule(L.LightningModule):
         return optimizer
 
     def export_plot_series(self) -> Dict[str, list[float]]:
-        """
-        Used by training command to save plots into plots/.
-        """
         return {
             "train_loss": self._epoch_train_losses,
             "val_loss": self._epoch_val_losses,

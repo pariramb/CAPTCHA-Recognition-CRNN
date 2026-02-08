@@ -1,5 +1,5 @@
 onnx_path: artifacts/model.onnx
 
-trt_engine_path: /home/yana/CAPTCHA-Recognition-CRNN/artifacts/model_fp16.engine
+trt_engine_path: artifacts/model_fp16.engine
 trt_fp16: true
 trt_workspace_mb: 2048

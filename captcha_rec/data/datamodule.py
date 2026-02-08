@@ -25,12 +25,11 @@ class Vocabulary:
     def pad_id(self) -> int:
         return self.token_to_id[self.pad_token]
 
+    def size(self) -> int:
+        return len(self.tokens)
+
 
 def build_default_vocab() -> Vocabulary:
-    """
-    Keep same spirit as original:
-    <pad> + digits + A-Z + a-z
-    """
     special = ("<pad>",)
     digits = tuple(str(i) for i in range(10))
     upper = tuple(chr(c) for c in range(ord("A"), ord("Z") + 1))
@@ -45,92 +44,13 @@ def build_default_vocab() -> Vocabulary:
     )
 
 
-def svhn_int_label_to_sequence(
-    label: int,
-    max_len: int,
-    pad_id: int,
-) -> torch.Tensor:
-    """
-    SVHN in torchvision is single-digit classification:
-      label is int in [0..9], where 10 means '0' for SVHN historically.
-    We'll map 10 -> 0.
-    Then create sequence of length max_len: [digit, <pad>, <pad>...]
-    """
-    digit = 0 if label == 10 else int(label)
-    seq = [digit] + [pad_id] * max(0, max_len - 1)
-    return torch.tensor(seq, dtype=torch.long)
-
-
 class ImageToTextDataset(Dataset):
     def __init__(self, path, transform):
-        special_char = ["<pad>"]  # ["<unk>", "<pad>"]
-        num = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
-        upper_alphabet = [
-            "A",
-            "B",
-            "C",
-            "D",
-            "E",
-            "F",
-            "G",
-            "H",
-            "I",
-            "J",
-            "K",
-            "L",
-            "M",
-            "N",
-            "O",
-            "P",
-            "Q",
-            "R",
-            "S",
-            "T",
-            "U",
-            "V",
-            "W",
-            "X",
-            "Y",
-            "Z",
-        ]
-        lower_alphabet = [
-            "a",
-            "b",
-            "c",
-            "d",
-            "e",
-            "f",
-            "g",
-            "h",
-            "i",
-            "j",
-            "k",
-            "l",
-            "m",
-            "n",
-            "o",
-            "p",
-            "q",
-            "r",
-            "s",
-            "t",
-            "u",
-            "v",
-            "w",
-            "x",
-            "y",
-            "z",
-        ]
+        self.vocab = build_default_vocab()
         BAN_DATA = [
             f"{path}/Large_Captcha_Dataset/4q2wA.png",
         ]
         self.MAX_LEN = 10
-
-        string_list = special_char + num + upper_alphabet + lower_alphabet
-        self.CHAR_NUM = len(string_list)
-
-        token_dictionary = {i: string_list[i] for i in range(len(string_list))}
-        self.reversed_token_dict = {v: k for k, v in token_dictionary.items()}
 
         self.path = path
         self.transformer = transform
@@ -161,10 +81,10 @@ class ImageToTextDataset(Dataset):
 
         Y = []
         for char in list(filename.split("/")[-1].split(".")[0]):
-            Y.append(self.reversed_token_dict[char])
+            Y.append(self.vocab.token_to_id[char])
 
         if len(Y) < self.MAX_LEN:
-            Y += [self.reversed_token_dict["<pad>"]] * (self.MAX_LEN - len(Y))
+            Y += [self.vocab.token_to_id["<pad>"]] * (self.MAX_LEN - len(Y))
 
         img = cv2.imread(self.file[idx])
         try:
@@ -175,13 +95,11 @@ class ImageToTextDataset(Dataset):
 
         Y_tensor_list = []
         for y_ind in Y:
-            y_tensor = torch.zeros(self.CHAR_NUM)
+            y_tensor = torch.zeros(self.vocab.size())
             y_tensor[y_ind] = 1
             Y_tensor_list.append(y_tensor.unsqueeze(0))
 
-        return X, torch.tensor(
-            Y
-        )  # torch.cat(Y_tensor_list).transpose(-1, -2), torch.tensor(Y)
+        return X, torch.tensor(Y)
 
 
 class CaptchaDataModule(L.LightningDataModule):

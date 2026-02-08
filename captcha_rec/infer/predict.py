@@ -24,12 +24,10 @@ def _softmax(x: np.ndarray, axis: int) -> np.ndarray:
 def _preprocess_image(path: Path, image_size: int) -> np.ndarray:
     img = Image.open(path).convert("RGB")
     img = img.resize((image_size, image_size))
-    arr = np.asarray(img).astype(np.float32) / 255.0  # [H,W,3] 0..1
+    arr = np.asarray(img).astype(np.float32) / 255.0
 
-    # normalize like torch: (x-0.5)/0.5 => [-1..1]
     arr = (arr - 0.5) / 0.5
 
-    # to NCHW
     arr = np.transpose(arr, (2, 0, 1))
     arr = np.expand_dims(arr, axis=0)
     return arr.astype(np.float32)
@@ -82,9 +80,9 @@ def run_onnx_infer(
             continue
 
         x = _preprocess_image(img_path, image_size=image_size)
-        logits = sess.run(["logits"], {"input": x})[0]  # [B, vocab, max_len]
+        logits = sess.run(["logits"], {"input": x})[0]
         probs = _softmax(logits, axis=1)
-        token_ids = np.argmax(probs, axis=1)[0].tolist()  # [max_len]
+        token_ids = np.argmax(probs, axis=1)[0].tolist()
         pred_text = decode_tokens(token_ids)
 
         all_preds.append(Prediction(path=str(img_path), pred_text=pred_text))
